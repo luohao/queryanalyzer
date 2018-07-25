@@ -2,6 +2,7 @@ package com.twitter.query.oline;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.execution.QueryIdGenerator;
+import com.facebook.presto.hive.HiveHadoop2Plugin;
 import com.facebook.presto.hive.HivePlugin;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.QualifiedObjectName;
@@ -15,10 +16,14 @@ import com.facebook.presto.sql.analyzer.Analysis;
 import com.facebook.presto.sql.analyzer.Analyzer;
 import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.parser.SqlParserOptions;
+import com.facebook.presto.sql.planner.LogicalPlanner;
+import com.facebook.presto.sql.planner.Plan;
+import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.tree.Statement;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.twitter.query.QueryAnalysis;
+import it.unimi.dsi.fastutil.ints.IntLists;
 
 import java.util.Collections;
 import java.util.LinkedList;
@@ -33,7 +38,6 @@ import static java.util.Locale.ENGLISH;
 
 public class QueryAnalyzer
 {
-    public static final String HIVE_CATALOG = "hive";
     private static final SqlParser SQL_PARSER = new SqlParser();
     private final TestingPrestoServer server;
     private final Session session;
@@ -70,6 +74,24 @@ public class QueryAnalyzer
         return queryAnalysis;
     }
 
+    public Plan plan(String query)
+    {
+        final Plan[] plan = new Plan[1];
+        Run(session -> {
+            Statement statement = SQL_PARSER.createStatement(query);
+            Analyzer analyzer = new Analyzer(session,
+                    server.getMetadata(),
+                    SQL_PARSER,
+                    server.getAccessControl(),
+                    Optional.empty(),
+                    Collections.emptyList());
+            Analysis analysis = analyzer.analyze(statement);
+            LogicalPlanner logicalPlanner = new LogicalPlanner(session, ImmutableList.of(), new PlanNodeIdAllocator(), server.getMetadata(), SQL_PARSER);
+            plan[0] = logicalPlanner.plan(analysis);
+        });
+        return plan[0];
+    }
+
     public void close()
     {
         try {
@@ -90,9 +112,9 @@ public class QueryAnalyzer
     private void registerHiveCatalog()
     {
         // TODO: move catalog configs to files and load from config file
-        server.installPlugin(new HivePlugin(HIVE_CATALOG, null));
-        server.createCatalog("hive", "hive", ImmutableMap.<String, String>builder()
-                .put("hive.metastore.uri", "thrift://hadoop-master:9083")
+        server.installPlugin(new HiveHadoop2Plugin());
+        server.createCatalog("dal", "hive-hadoop2", ImmutableMap.<String, String>builder()
+                .put("hive.metastore.uri", "thrift://localhost:9083")
                 .build());
     }
 
